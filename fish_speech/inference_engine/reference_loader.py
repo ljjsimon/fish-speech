@@ -6,6 +6,7 @@ from typing import Callable, Literal, Tuple
 import torch
 import torchaudio
 from loguru import logger
+import numpy as np
 
 from fish_speech.models.dac.modded_dac import DAC
 from fish_speech.utils.file import (
@@ -130,3 +131,35 @@ class ReferenceLoader:
 
         audio = waveform.squeeze().numpy()
         return audio
+    
+    def fast_load_by_id(
+        self,
+        id: str,
+        use_cache: Literal["on", "off"],
+    ) -> Tuple[list, list]:
+        # Load the references audio and text by id
+        ref_folder = Path("references") / id
+        ref_folder.mkdir(parents=True, exist_ok=True)
+        ref_audios = list_files(
+            ref_folder, {"npy"}, recursive=True, sort=False
+        )
+
+        if use_cache == "off" or id not in self.ref_by_id:
+            # If the references are not already loaded, encode them
+            prompt_tokens = [
+                torch.from_numpy(np.load(str(ref_audio)))
+                for ref_audio in ref_audios
+            ]
+            prompt_texts = [
+                read_ref_text(str(ref_audio.with_suffix(".lab")))
+                for ref_audio in ref_audios
+            ]
+            self.ref_by_id[id] = (prompt_tokens, prompt_texts)
+
+        else:
+            # Reuse already encoded references
+            logger.info("Use same references")
+            prompt_tokens, prompt_texts = self.ref_by_id[id]
+
+        return prompt_tokens, prompt_texts
+    

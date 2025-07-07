@@ -5,6 +5,8 @@ from typing import Generator
 import numpy as np
 import torch
 from loguru import logger
+from pathlib import Path
+import uuid
 
 from fish_speech.inference_engine.reference_loader import ReferenceLoader
 from fish_speech.inference_engine.utils import InferenceResult, wav_chunk_header
@@ -16,7 +18,7 @@ from fish_speech.models.text2semantic.inference import (
     WrappedGenerateResponse,
 )
 from fish_speech.utils import autocast_exclude_mps, set_seed
-from fish_speech.utils.schema import ServeTTSRequest
+from fish_speech.utils.schema import ServeTTSRequest, ServeReferenceAudio
 
 
 class TTSInferenceEngine(ReferenceLoader, VQManager):
@@ -49,12 +51,22 @@ class TTSInferenceEngine(ReferenceLoader, VQManager):
         prompt_tokens, prompt_texts = [], []
         # Load the reference audio and text based on id or hash
         if ref_id is not None:
-            prompt_tokens, prompt_texts = self.load_by_id(ref_id, req.use_memory_cache)
+            # prompt_tokens, prompt_texts = self.load_by_id(ref_id, req.use_memory_cache)
+            prompt_tokens, prompt_texts = self.fast_load_by_id(ref_id, req.use_memory_cache)
 
         elif req.references:
             prompt_tokens, prompt_texts = self.load_by_hash(
                 req.references, req.use_memory_cache
             )
+            if req.save_prompt:
+                # Save the prompt to a file if requested
+                ref_id = str(uuid.uuid4())
+                self.save_prompt(
+                    references=req.references,
+                    prompt_tokens=prompt_tokens,
+                    ref_id=ref_id,
+                )
+                logger.info(f"Saved prompt with id: {ref_id}")
 
         # Set the random seed if provided
         if req.seed is not None:
@@ -190,3 +202,27 @@ class TTSInferenceEngine(ReferenceLoader, VQManager):
 
         # Convert the audio to numpy
         return segment.float().cpu().numpy()
+
+    def save_prompt(
+        self,
+        references: list[ServeReferenceAudio],
+        prompt_tokens: list,
+        ref_id: str,
+    ) -> None:
+        """
+        Save the prompt tokens and texts to a file.
+        """
+        ref_folder = Path("references") / ref_id
+        ref_folder.mkdir(parents=True, exist_ok=True)
+
+        # Save the reference audios and texts
+        for i, ref in enumerate(references):
+            ref_audio_path = ref_folder / f"audio_{i}.wav"
+            # save prompt tokens
+            np.save(ref_audio_path.with_suffix(".npy"), prompt_tokens[i].cpu().numpy())
+            # save aduio
+            with open(ref_audio_path, "wb") as f:
+                f.write(ref.audio)
+            # save prompt text
+            with open(ref_audio_path.with_suffix(".lab"), "w") as f:
+                f.write(ref.text + "\n")
