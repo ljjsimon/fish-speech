@@ -79,6 +79,7 @@ class ReferenceLoader:
         self,
         references: list[ServeReferenceAudio],
         use_cache: Literal["on", "off"],
+        save_prompt: bool = True,
     ) -> Tuple:
 
         # Load the references audio and text by hash
@@ -98,6 +99,13 @@ class ReferenceLoader:
                 prompt_texts.append(ref.text)
                 self.ref_by_hash[audio_hashes[i]] = (prompt_tokens[-1], ref.text)
 
+                if save_prompt:
+                    self.save_prompt(
+                        ref = ref,
+                        prompt_token_npy = prompt_tokens[-1].cpu().numpy(),
+                        ref_id=audio_hashes[i],
+                    )
+                    logger.info(f"Saved prompt with id: {audio_hashes[i]}")
             else:
                 # Reuse already encoded references
                 cached_token, cached_text = self.ref_by_hash[audio_hashes[i]]
@@ -132,6 +140,29 @@ class ReferenceLoader:
         audio = waveform.squeeze().numpy()
         return audio
     
+    def save_prompt(
+        self,
+        ref: ServeReferenceAudio,
+        prompt_token_npy: np.ndarray,
+        ref_id: str,
+    ) -> None:
+        """
+        Save the prompt tokens and texts to a file.
+        """
+        ref_folder = Path("references") / ref_id
+        ref_folder.mkdir(parents=True, exist_ok=True)
+
+        # Save the reference audios and texts
+        ref_audio_path = ref_folder / f"audio.wav"
+        # save prompt tokens
+        np.save(ref_audio_path.with_suffix(".npy"), prompt_token_npy)
+        # save aduio
+        with open(ref_audio_path, "wb") as f:
+            f.write(ref.audio)
+        # save prompt text
+        with open(ref_audio_path.with_suffix(".lab"), "w", encoding="utf-8") as f:
+            f.write(ref.text + "\n")
+
     def fast_load_by_id(
         self,
         id: str,
